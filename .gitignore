@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments and caches
+.venv*/
+venv/
+.cache/
+.conda/
+
+# Generated datasets, checkpoints and logs
+dataset/
+outputs/
+runs/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.log
+
+# Large local assets and upstream working copies
+3D Model/
+third_party/
+assets/
+images/
+*.glb
+*.gltf
+*.ply
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# Editors / operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

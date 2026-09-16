@@ -1,0 +1,4 @@
+interface:
+  display_name: "BB8 Server Training"
+  short_description: "配置4090服务器并训练DJI Action 4八角点热图网络"
+  default_prompt: "检查服务器环境、数据和训练配置，然后安全启动BB8 ResNet-FPN训练。"

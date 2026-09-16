@@ -1,0 +1,311 @@
+## 算法流程
+
+服务器端部署与训练请先阅读：
+
+- `docs/SERVER_TRAINING.md`
+- `skills/server-bb8-training/SKILL.md`
+- `prompts/deepseek_v4_1_flash_server_training.md`
+
+生成数据集、checkpoint、虚拟环境和预训练权重不存放在普通 Git 仓库中。
+
+### 当前可复现的 ResNet18-FPN 基线
+
+当前训练默认使用：
+
+```text
+dataset/action4-v4-random-validation-100/train_pbr
+```
+
+这是 100 帧的管线验证集，不是最终规模的正式训练集。数据读取器根据每个实例的
+`bbox_obj` 加 1.3 倍上下文，裁成方形后缩放到 `256x256`；相机内参同步更新。
+网络输出 stride-4 的 `8x64x64` Gaussian 热图。角点编号与数据中的
+`models/corners_3d.json` 完全一致：
+
+```text
+0 (xmin,ymin,zmin)  1 (xmax,ymin,zmin)
+2 (xmax,ymax,zmin)  3 (xmin,ymax,zmin)
+4 (xmin,ymin,zmax)  5 (xmax,ymin,zmax)
+6 (xmax,ymax,zmax)  7 (xmin,ymax,zmax)
+```
+
+运行标签预览、测试和短程训练：
+
+```bash
+.venv-hccepose/bin/python scripts/preview_bb8_labels.py --image-id 0
+.venv-hccepose/bin/python -m unittest discover -s tests -v
+.venv-hccepose/bin/python scripts/train_heatmap.py \
+  --epochs 10 --batch-size 8 --freeze-epochs 0 \
+  --out-dir outputs/heatmap_v4_composite_smoke --seed 460731
+```
+
+训练损失默认为热图 focal loss 加可微坐标 Smooth-L1。单独的 focal loss 在仅 100 张
+数据时容易先学成全背景；最终热图层使用 `bias=-2.19`，令初始前景概率约为 0.1。
+详细审计和实测结果见 `docs/bop_bb8_v4_pipeline.md`。
+
+### 1.数据集准备
+
+#### 1.1 三维模型建模
+
+寻找DJI Osmo Action 4图片(存放在images文件夹下)，用Hunyuan 3D生成对应的三维模型(网站：https://3d.hunyuan.tencent.com)
+
+#### 1.2 Blender渲染
+
+网站：https://github.com/WangYuLin-SEU/HCCEPose
+，用HCCEPose中的Blender脚本来进行渲染
+
+### 2.实现Instance-level object pose estimation network
+
+network主干是确定的：
+
+输入：单目RGB图片 -> 网络(ViT/ResNet) -> 输出：八个角点的Heatmap -> 提取八个角点
+
+我们应该参考BoxDream的设计思路：
+
+1.计算三维角点
+
+2.计算三维角点在相机坐标系中的位置
+
+转换公式是：
+$$
+P_i^c=RP_i^o+t
+$$
+
+可以分成两步理解。
+
+第一步：旋转
+$$
+P_i'=RP_i^o
+$$\(R\)描述物体坐标轴相对于相机坐标轴的朝向。
+例如DJI Action 4正对相机和侧对相机时，同一个角点在相机坐标系中的方向不同，这由 \(R\) 描述。
+
+第二步：平移
+$$
+P_i^c=P_i'+t
+$$\(t\)表示物体坐标系原点在相机坐标系中的位置。
+例如：
+$$
+t=
+\begin{bmatrix}
+0\\
+0\\
+1
+\end{bmatrix}
+$$表示物体中心位于相机正前方1个单位的位置。
+
+3.投影到图片
+
+投影公式是(应当注意的是，这些参数来自于相机内参矩阵)：
+$$
+u=f_x\frac{X_c}{Z_c}+c_x
+$$
+$$
+v=f_y\frac{Y_c}{Z_c}+c_y
+$$
+这里使用的是：
+$$
+(X_c,Y_c,Z_c)
+$$
+也就是点在相机坐标系中的位置。
+
+4.裁减缩放之后的关系
+$$
+K_{\text{crop}}=
+\begin{bmatrix}
+s_x&0&-s_xx_0\\
+0&s_y&-s_yy_0\\
+0&0&1
+\end{bmatrix}K
+$$
+
+5.生成八通道热图
+
+对第 $i$ 个角点，假设它的坐标是 $(x_i,y_i)$，代码在每个像素 $(x,y)$ 上计算：
+$$
+dx=x_i-x,\qquad dy=y_i-y,\qquad
+d_i(x,y)=\sqrt{dx^2+dy^2}
+$$
+所以，离角点越近，距离 $d_i$ 越小。例如角点在 (2, 1) 时，像素 (2, 1) 的距离为 0，像素 (0, 1) 的距离为 2。
+接着 BoxDreamer 把距离转换成热图值：
+$$
+h_i(x,y)=\exp\left(-\frac{d_i(x,y)}{\text{scale\_factor}_i}\right)
+$$
+角点附近的值高，远处的值低。8 个角点分别计算，最初存在 [B,H,W,8] 中：最后一个维度表示“第几个角点”。函数结束前执行 permute(0, 3, 1, 2)，才变成网络常用的 [B,8,H,W]——每个角点占一个通道。
+#### 2.1 BoxDream的设计思路
+
+重点应该考虑有哪些BoxDream里面的哪些模块能够迁移到当前我们要设计的Network
+#### 3.1 数据集划分
+
+最终的测试集只给了一段普通RGB视频，没有提供：
+
+- 每帧的真实旋转；
+- 每帧的真实平移；
+- 每帧的二维角点；
+- 相机内参；
+
+那么不能直接计算严格的旋转误差、平移误差和ADD。
+
+这种情况下建议建立三层验证。
+
+##### 第一层：合成验证集
+
+HCCEPose生成数据时，每张图都自带准确的：
+
+- 相机内参 \(K\)；
+- 真实位姿 \(R,t\)；
+- 8个三维角点；
+- 8个二维投影点。
+
+把合成数据明确划分为：
+
+```text
+train：用于更新网络参数
+validation：训练过程中选择最佳模型
+synthetic test：训练完成后只评估一次
+```
+
+重要的是不能让同一个渲染样本同时出现在训练集和验证集。
+
+在合成测试集上计算：
+
+- 平均二维角点误差；
+- `PCK@5px`；
+- 旋转误差；
+- 平移误差；
+- `ADD-0.1d`；
+- `Proj2D@5px`。
+
+这可以证明网络确实学会了任务，而不是只展示几个好看的例子。
+
+##### 第二层：制作少量真实验证帧
+
+从真实视频或自己拍摄的视频中均匀抽取大约50～100帧，例如：
+
+```text
+每隔20帧抽取一张
++
+额外抽取运动模糊、遮挡、远距离等困难帧
+```
+
+至少人工标注：
+
+- 物体检测框；
+- 可判断的二维包围盒角点。
+
+如果能通过人工操作或标定工具获得真实位姿更好，但成本更高。
+
+这样可以计算真实图像上的：
+
+- 平均角点误差；
+- PCK；
+- 检测成功率；
+- PnP成功率。
+
+这组数据不要用于训练，否则就失去了验证意义。
+
+##### 第三层：测试视频上的无标注评价
+
+没有Ground Truth时，可以评估运行质量，但这些不能完全替代真实精度指标。
+
+### 1. PnP成功率
+
+```text
+成功返回位姿的帧数 / 总帧数
+```
+
+### 2. RANSAC内点数
+
+如果角点预测可靠，PnP/RANSAC通常能找到更多一致对应点。
+
+不过这里只有8个角点，所以该指标只能辅助判断。
+
+### 3. 重投影残差
+
+把三维角点使用预测位姿投影回图片：
+
+$$
+E_{\text{self-reproj}}
+=
+\frac{1}{8}
+\sum_i
+\|
+\hat p_i-p_i^{pred}
+\|
+$$
+
+它能检查PnP拟合情况，但不能证明预测角点真的正确——8个错误角点也可能恰好拟合出一个姿态。
+
+### 4. 视频时间稳定性
+
+视频相邻帧通常变化连续。如果物体没有突然运动，而预测位姿剧烈跳动，说明网络不稳定。
+
+可以计算：
+
+$$
+E_{R,\text{temporal}}(t)
+=
+\operatorname{angle}(R_tR_{t-1}^{T})
+$$
+
+$$
+E_{t,\text{temporal}}(t)
+=
+\|t_t-t_{t-1}\|_2
+$$
+
+统计：
+
+- 位姿跳变次数；
+- 相邻帧平均旋转变化；
+- 相邻帧平均平移变化；
+- 无结果帧比例。
+
+但要注意：如果真实物体本身快速运动，较大的帧间变化不一定是错误。
+
+### 5. 可视化检查
+
+将以下内容绘制回原视频：
+
+- 8个预测角点；
+- 三维包围盒；
+- XYZ坐标轴；
+- PnP是否成功；
+- 重投影误差；
+- 每帧置信度。
+
+如果三维框能稳定贴合 DJI Action 4 的外轮廓，方向轴也与物体运动一致，说明效果至少在视觉上合理。
+
+## 九、推荐的实验设计
+
+最终报告可以分成三部分：
+
+| 数据集 | 是否有GT | 用途 | 指标 |
+|---|---:|---|---|
+| 合成验证集 | 有 | 训练选模型 | Loss、角点误差、PCK |
+| 合成测试集 | 有 | 严格量化 | R/t误差、ADD、Proj2D |
+| 老师测试视频 | 可能没有 | 最终演示 | 成功率、稳定性、可视化 |
+
+最重要的是：老师测试视频只能在最后使用，不应该为了让结果更好而加入训练。
+
+## 十、对当前项目最实用的方案
+
+建议最终程序接受一个视频，直接输出：
+
+```text
+output_pose.csv
+output_visualization.mp4
+```
+
+其中 `output_pose.csv` 每帧记录：
+
+```text
+frame_id,
+pnp_success,
+rvec_x, rvec_y, rvec_z,
+tvec_x, tvec_y, tvec_z,
+reprojection_error,
+corner_confidence
+```
+
+`output_visualization.mp4` 则把角点、三维框和坐标轴画出来。
+
+这样既有定量结果，也有直观视频；同时还能区分网络角点预测、PnP求解和视频稳定性三个方面的效果。
