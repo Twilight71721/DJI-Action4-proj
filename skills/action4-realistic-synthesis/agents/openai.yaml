@@ -1,0 +1,4 @@
+interface:
+  display_name: "Action 4 Realistic Synthesis"
+  short_description: "Generate video-domain-adapted Action 4 Blender/BOP data."
+  default_prompt: "Use real-frame evidence to plan, preview, validate, and integrate realistic Action 4 synthetic data without changing target geometry or labels."

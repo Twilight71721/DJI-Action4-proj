@@ -1,0 +1,20 @@
+{
+  "epochs": 30,
+  "new_pairs": 12000,
+  "seed": 20260927,
+  "dataset_manifest_sha256": "1b9a9470289122cb5de20ac69f682a3a7977f43c39facacb64086cd59e75e51a",
+  "allowed_checkpoint_sha256": [
+    "b5d44e64e4b7305bb39bd233912dfcdfd43dbc9547d24af13b070bcccbef69ce",
+    "92f0ede359a2ec7f3d5e77a4b1b422214b88af9cd1901d2485d4f0d09e275421"
+  ],
+  "expected_foreground_assets": 4352,
+  "expected_train_pose_assets": 4096,
+  "expected_val_pose_assets": 256,
+  "extra_occlusion": false,
+  "crop_jitter": false,
+  "online_background_probability": 1.0,
+  "clean_blur_ratio": [1, 1],
+  "pose_sampling": "50% uniform SO3, 50% continuous perturbations of video pose anchors",
+  "appearance_lighting_independent_of_pose": true,
+  "note": "4096 finite training draws, not full continuous pose coverage. Real video is adaptation material, not a blind test."
+}

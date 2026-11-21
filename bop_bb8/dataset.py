@@ -19,6 +19,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
 
 from .geometry import (
     BOPModel,
@@ -29,6 +30,8 @@ from .geometry import (
     scale_keypoints_to_heatmap,
 )
 from .heatmap import DEFAULT_VALUE_RANGE, make_bbox_heatmaps
+from .cropping import (corner_bounds, tight_crop_window, extract_window,
+                       rectangular_crop_window, choose_rectangular_size)
 
 
 @dataclass
@@ -38,7 +41,7 @@ class BOPInstanceSample:
     image: np.ndarray            # [H, W, 3] uint8 RGB, the network input frame
     corners_3d: np.ndarray       # [8, 3] float32, model frame, mm
     keypoints_2d: np.ndarray     # [8, 2] float32, input-frame pixels; NaN if Z <= 0
-    valid: np.ndarray            # [8] bool, inside input frame and Z > 0
+    valid: np.ndarray            # [8] bool, inside prediction canvas and Z > 0
     heatmaps: np.ndarray         # [8, Hh, Wh] float32 in heatmap_value_range
     K_input: np.ndarray          # [3, 3] float64 intrinsics of the input frame
     R_m2c: np.ndarray            # [3, 3] float64
@@ -50,6 +53,7 @@ class BOPInstanceSample:
     image_path: str
     visib_fract: float
     crop_xywh: tuple[int, int, int, int]
+    content_bbox_xyxy: tuple[float, float, float, float] | None = None
 
 
 class BOPInstanceDataset:
@@ -68,6 +72,13 @@ class BOPInstanceDataset:
         crop_padding: float = 1.3,
         heatmap_kernel: str = "boxdreamer",
         heatmap_sigma: float = 2.0,
+        crop_jitter_shift: float = 0.0,
+        crop_jitter_padding: tuple[float, float] | None = None,
+        crop_jitter_seed: int = 0,
+        crop_border: int = 4,
+        require_all_corners: bool = False,
+        heatmap_margin: int = 0,
+        rect_sizes: tuple[tuple[int, int], ...] | None = None,
     ) -> None:
         """``heatmap_size`` is ``(Hh, Wh)``; ``input_size`` is ``(W, H)``.
 
@@ -77,15 +88,46 @@ class BOPInstanceDataset:
         """
         if pose_scale <= 0:
             raise ValueError(f"pose_scale must be positive, got {pose_scale}")
-        if crop_mode not in {"full", "bbox"}:
-            raise ValueError(f"crop_mode must be 'full' or 'bbox', got {crop_mode!r}")
+        if crop_mode not in {"full", "bbox", "cuboid", "rect"}:
+            raise ValueError(f"Unsupported crop_mode: {crop_mode!r}")
         if crop_padding < 1.0:
             raise ValueError(f"crop_padding must be >= 1, got {crop_padding}")
+        if crop_mode == "cuboid" and crop_padding != 1.0:
+            raise ValueError("cuboid crops require crop_padding=1.0; border is solid-color input pixels")
+        if not isinstance(crop_border, (int, np.integer)) or crop_border < 0:
+            raise ValueError("crop_border must be a nonnegative integer")
         self.root = Path(root)
         self.model = model
         self.pose_scale = float(pose_scale)
         self.crop_mode = crop_mode
         self.crop_padding = float(crop_padding)
+        self.crop_border = int(crop_border)
+        self.require_all_corners = bool(require_all_corners)
+        if not isinstance(heatmap_margin, int) or heatmap_margin < 0:
+            raise ValueError('heatmap_margin must be an integer >= 0')
+        if rect_sizes is not None and crop_mode != 'rect':
+            raise ValueError('rect_sizes requires crop_mode=rect')
+        if crop_mode == 'rect' and (crop_padding != 1.0 or crop_border != 0):
+            raise ValueError('rect crops require padding=1.0 and border=0; RGB must not be padded')
+        self.heatmap_margin = heatmap_margin
+        self.rect_sizes = tuple(tuple(size) for size in rect_sizes) if rect_sizes is not None else None
+        if self.rect_sizes is not None:
+            choose_rectangular_size((0, 0, 100, 100), self.rect_sizes)
+        self._image_sizes = {}
+        if not np.isfinite(crop_jitter_shift) or not 0 <= crop_jitter_shift <= 0.5:
+            raise ValueError("crop_jitter_shift must be finite and in [0, 0.5]")
+        if crop_jitter_padding is not None:
+            if (len(crop_jitter_padding) != 2 or not np.isfinite(crop_jitter_padding).all()
+                    or not 1 <= crop_jitter_padding[0] <= crop_jitter_padding[1]):
+                raise ValueError("crop_jitter_padding must satisfy 1 <= min <= max")
+        if (crop_jitter_shift or crop_jitter_padding is not None) and crop_mode != "bbox":
+            raise ValueError("crop jitter requires crop_mode='bbox'")
+        if crop_jitter_seed < 0:
+            raise ValueError("crop_jitter_seed must be nonnegative")
+        self.crop_jitter_shift = float(crop_jitter_shift)
+        self.crop_jitter_padding = crop_jitter_padding
+        self.crop_jitter_seed = int(crop_jitter_seed)
+        self.epoch = 0
         self.heatmap_kernel = heatmap_kernel
         self.heatmap_sigma = float(heatmap_sigma)
         self.crop = crop
@@ -171,6 +213,58 @@ class BOPInstanceDataset:
     def __len__(self) -> int:
         return len(self.instances)
 
+    def set_epoch(self, epoch: int) -> None:
+        """Call before creating the epoch iterator; do not use persistent workers."""
+        if epoch < 0:
+            raise ValueError("epoch must be nonnegative")
+        self.epoch = int(epoch)
+
+    def get_input_size(self, index: int) -> tuple[int, int]:
+        """Read only metadata/image headers for deterministic shape batching."""
+        if self.rect_sizes is None:
+            return self.input_size
+        scene, frame, instance = self.instances[index]
+        _, cameras, info = self._load_scene(scene)
+        camera = cameras[str(frame)]
+        key = (scene, frame)
+        if key not in self._image_sizes:
+            if 'width' in camera and 'height' in camera:
+                self._image_sizes[key] = (int(camera['width']), int(camera['height']))
+            else:
+                folder = self.root / scene / 'rgb'
+                path = next(p for suffix in ('.png', '.jpg', '.jpeg')
+                            if (p := folder / f'{frame:06d}{suffix}').is_file())
+                with Image.open(path) as image:
+                    self._image_sizes[key] = image.size
+        x, y, w, h = info[str(frame)][instance]['bbox_obj']
+        crop = rectangular_crop_window((x, y, x+w, y+h), self._image_sizes[key])
+        return choose_rectangular_size(crop, self.rect_sizes)
+
+    def _jitter_crop(self, bbox, image_size, baseline, K, R, t, identity):
+        if self.crop_jitter_shift == 0 and self.crop_jitter_padding is None:
+            return baseline
+        # A local generator leaves sampler/model randomness identical in A/B runs.
+        rng = np.random.default_rng(np.random.SeedSequence(
+            [self.crop_jitter_seed, self.epoch, *map(int, identity)]))
+        original, _, _ = project_corners(self.model.corners_mm(), K, R, t, image_size=image_size)
+        _, protected, _ = project_corners(
+            self.model.corners_mm(), crop_and_scale_intrinsics(K, baseline, self.input_size),
+            R, t, image_size=self.input_size)
+        padding_range = self.crop_jitter_padding or (self.crop_padding, self.crop_padding)
+        for _ in range(8):
+            x, y, w, h = map(float, bbox)
+            dx, dy = rng.uniform(-self.crop_jitter_shift, self.crop_jitter_shift, 2)
+            candidate = self._bbox_crop(
+                (x + dx * w, y + dy * h, w, h), image_size, rng.uniform(*padding_range))
+            cx, cy, cw, ch = candidate
+            points = (original - [cx, cy]) * (np.array(self.input_size) / [cw, ch])
+            inside = (np.isfinite(points).all(axis=1) & (points >= 0).all(axis=1)
+                      & (points < self.input_size).all(axis=1))
+            if inside[protected].all():
+                return candidate
+        # Do not remove previously supervised corners to obtain an easier loss.
+        return baseline
+
     def load_instance(self, scene_id: str, image_id: int, instance_idx: int) -> BOPInstanceSample:
         gt, cam, info = self._load_scene(scene_id)
         entry = gt[str(image_id)][instance_idx]
@@ -184,30 +278,59 @@ class BOPInstanceDataset:
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
             raise FileNotFoundError(image_path)
+        content_box = None
+        input_size = self.input_size
         if self.crop_mode == "bbox":
             crop = self._bbox_crop(
                 info[str(image_id)][instance_idx]["bbox_obj"],
                 (image.shape[1], image.shape[0]),
                 self.crop_padding,
             )
+            crop = self._jitter_crop(
+                info[str(image_id)][instance_idx]["bbox_obj"],
+                (image.shape[1], image.shape[0]), crop, K, R_m2c, t_m2c,
+                (scene_id, image_id, instance_idx))
+        elif self.crop_mode == "cuboid":
+            original, _, _ = project_corners(self.model.corners_mm(), K, R_m2c, t_m2c,
+                                             image_size=(image.shape[1], image.shape[0]))
+            content_box = corner_bounds(original)
+            crop = tight_crop_window(content_box, self.input_size, self.crop_border)
+        elif self.crop_mode == "rect":
+            bx, by, bw, bh = info[str(image_id)][instance_idx]["bbox_obj"]
+            crop = rectangular_crop_window((bx, by, bx+bw, by+bh), (image.shape[1], image.shape[0]))
+            if self.rect_sizes is not None:
+                input_size = choose_rectangular_size(crop, self.rect_sizes)
         else:
             crop = self.crop
-        K_input = crop_and_scale_intrinsics(K, crop, self.input_size)
+        K_input = crop_and_scale_intrinsics(K, crop, input_size)
         x0, y0, wc, hc = crop
-        image = image[y0:y0 + hc, x0:x0 + wc]
-        if (image.shape[1], image.shape[0]) != self.input_size:
-            interpolation = cv2.INTER_AREA if self.input_size[0] * self.input_size[1] < wc * hc else cv2.INTER_LINEAR
-            image = cv2.resize(image, self.input_size, interpolation=interpolation)
+        image = (extract_window(image, crop, content_box) if content_box is not None
+                 else image[y0:y0 + hc, x0:x0 + wc])
+        if (image.shape[1], image.shape[0]) != input_size:
+            interpolation = cv2.INTER_AREA if input_size[0] * input_size[1] < wc * hc else cv2.INTER_LINEAR
+            image = cv2.resize(image, input_size, interpolation=interpolation)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         corners_3d = self.model.corners_mm()
-        keypoints_2d, valid, _ = project_corners(corners_3d, K_input, R_m2c, t_m2c, image_size=self.input_size)
-        input_hw = (self.input_size[1], self.input_size[0])
-        heatmap_kps = scale_keypoints_to_heatmap(keypoints_2d, input_hw, self.heatmap_size)
+        keypoints_2d, valid, _ = project_corners(corners_3d, K_input, R_m2c, t_m2c, image_size=input_size)
+        input_hw = (input_size[1], input_size[0])
+        core_heatmap_size = ((input_hw[0]//4, input_hw[1]//4)
+                             if self.rect_sizes is not None else self.heatmap_size)
+        heatmap_kps = scale_keypoints_to_heatmap(keypoints_2d, input_hw, core_heatmap_size)
+        heatmap_kps += self.heatmap_margin
+        heatmap_size = tuple(size + 2*self.heatmap_margin for size in core_heatmap_size)
+        if self.heatmap_margin:
+            valid = (np.isfinite(heatmap_kps).all(1) & (heatmap_kps >= 0).all(1)
+                     & (heatmap_kps < np.array(heatmap_size[::-1])).all(1))
+        if self.require_all_corners and not valid.all():
+            raise ValueError(
+                f'{scene_id}/{image_id}/{instance_idx}: corners {np.flatnonzero(~valid).tolist()} '
+                'outside the prediction canvas or behind the camera; calibrate a fixed canvas '
+                'on training data instead of silently dropping corner supervision')
         heatmaps = make_bbox_heatmaps(
             heatmap_kps,
             valid,
-            self.heatmap_size,
+            heatmap_size,
             self.heatmap_value_range,
             kernel=self.heatmap_kernel,
             sigma=self.heatmap_sigma,
@@ -229,6 +352,7 @@ class BOPInstanceDataset:
             image_path=str(image_path),
             visib_fract=float(info[str(image_id)][instance_idx].get("visib_fract", 1.0)),
             crop_xywh=crop,
+            content_bbox_xyxy=content_box,
         )
 
     def __getitem__(self, index: int) -> BOPInstanceSample:

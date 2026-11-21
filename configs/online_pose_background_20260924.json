@@ -1,0 +1,20 @@
+{
+  "epochs": 30,
+  "new_pairs": 8000,
+  "seed": 20260926,
+  "dataset_manifest_sha256": "1b9a9470289122cb5de20ac69f682a3a7977f43c39facacb64086cd59e75e51a",
+  "allowed_checkpoint_sha256": [
+    "00fee1db3f3909337ea70544b235e470ef6cefde093d53b12f6135ec9024e4a2",
+    "61b6484f714652f2b42e13d43df97b419080cbb098b5952ef46524e17ba00a92"
+  ],
+  "extra_occlusion": false,
+  "crop_jitter": false,
+  "online_background_probability": 1.0,
+  "clean_blur_ratio": [
+    1,
+    1
+  ],
+  "systematic_train_orientations": 248,
+  "systematic_val_orientations": 24,
+  "existing_foreground_assets": 246
+}

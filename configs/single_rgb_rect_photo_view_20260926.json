@@ -1,0 +1,79 @@
+{
+  "task": "single RGB instance crop -> eight ordered heatmaps -> eight projected corners",
+  "note": "Experimental RGB photometric augmentation; fixed YOLO, no geometry augmentation or additional occlusion. Validate before promotion.",
+  "training": {
+    "backbone": "resnet18",
+    "fpn_dim": 128,
+    "input_size": [
+      256,
+      256
+    ],
+    "rect_sizes": [
+      [
+        384,
+        128
+      ],
+      [
+        352,
+        160
+      ],
+      [
+        320,
+        192
+      ],
+      [
+        288,
+        224
+      ],
+      [
+        256,
+        256
+      ],
+      [
+        224,
+        288
+      ],
+      [
+        192,
+        320
+      ],
+      [
+        160,
+        352
+      ],
+      [
+        128,
+        384
+      ]
+    ],
+    "crop_mode": "rect",
+    "crop_padding": 1.0,
+    "crop_border": 0,
+    "heatmap_margin": 32,
+    "train_min_visib_fract": 0.05,
+    "require_all_corners": true,
+    "heatmap_kernel": "gaussian",
+    "heatmap_sigma": 2.0,
+    "loss": "spatial_kl",
+    "decoder": "local",
+    "decode_radius": 3,
+    "freeze_bn": true,
+    "freeze_epochs": 2,
+    "epochs": 30,
+    "batch_size": 32,
+    "lr": 0.0003,
+    "backbone_lr_scale": 0.1,
+    "weight_decay": 0.0001,
+    "cosine_lr": true,
+    "strict_updates": true,
+    "amp": true,
+    "amp_dtype": "bfloat16",
+    "num_workers": 8,
+    "torch_threads": 4,
+    "seed": 20260926,
+    "photometric_augmentation": true,
+    "view_balance": true,
+    "view_weight_cap": 3.0,
+    "deterministic_cudnn": true
+  }
+}

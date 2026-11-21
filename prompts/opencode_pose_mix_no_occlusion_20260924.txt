@@ -1,0 +1,13 @@
+请在这台配有 RTX 4090 的服务器上完成 resnet_pose_mix_no_occlusion_20260924 增量包中的数据准备、训练、评估和结果打包。
+
+先找到我上传的 resnet_pose_mix_no_occlusion_20260924.tar.gz 及同名 .sha256，校验后解压到新目录，校验包内 SHA256SUMS，完整阅读 OPENCODE_SERVER_GUIDE.md，再按其中的脚本执行。不要覆盖或删除旧数据、训练结果与权重，不要修改驱动、系统 CUDA、代理或重装已经成功训练的环境。
+
+已确定方案：不添加任何额外遮挡，不启用裁剪扰动；混合服务器已有 5000 张清晰/模糊数据的原训练部分与新增 246 张前景姿态素材。在服务器准备 5120 张网上背景照片，复用旧背景池的真实视频背景裁片，统一随机混合。生成 8000 组新清晰/模糊配对图，共 16000 张单相机图，与旧训练集 16000 个实例混合。标签跟随位置/缩放变化，不能在训练 RGB 中画框或绿色点。旧验证集和测试集不变，衍生图全部只能用于训练。
+
+优先核对旧目录 /home/aitest/exam-project/resnet5000_cleanblur_4090/dataset，以及 /home/aitest/exam-project/resnet5000_background_mixed_20260923/augmentation 和其 outputs/background_mixed_30ep/training/best.pth。如果路径移动，搜索实际位置并校验，不要替换为别的模型或重新划分数据。原始起点 SHA256 必须是 91251527dcc1c1d5bb51c20f0054e2264a39b00e096956db1b92820139a61ded，包内配置也允许同权重的已验证去优化器版本。
+
+运行 run_pose_mix_training.py --action check。检查通过后按文档准备背景和合成样本，实际查看 preview/index.html 和样例图；确认几何标签与图片一致、清晰/模糊配对有效、没有人为遮挡或截断。再完成新增样本 smoke、单次正式 30 轮训练、前后模型统一评估与结果打包。可使用 --action all 串联，但发现数据或标签异常时必须停止定位，不能跳过验证。
+
+默认 batch32、workers8、BF16、ResNet50-FPN、256 输入、64 热图，保持损失与解码不变，从上一轮背景训练 best 初始化并重建优化器。若显存充足，可以按文档显式选择 batch64，但必须先通过 batch64 的 smoke；OOM 则按文档用较小批量重新通过同配置 smoke，不能缩小输入尺寸。使用 tmux，报告进度与根据实际每轮 seconds 得到的耗时估计，不把小批 smoke 当成完整训练。
+
+过程中无需反复询问我已经确定的方案；若缺少必须复用的文件、校验失败或遇到无法解决的异常，请明确报告路径和原因。不要自动 commit/push。结束时给我 outputs/pose_mix_no_occlusion_30ep.tar.gz 和 .sha256 的绝对路径及主要指标，保留服务器训练集与原始完整 checkpoint。真实帧没有角点 GT 且已参与适配，不能宣称它是独立盲测或给出虚构真实准确率。

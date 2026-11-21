@@ -7,9 +7,12 @@ from .decode import (
     decode_argmax,
     decode_soft_argmax,
     decode_topk,
+    decode_local_peak,
+    decode_heatmaps,
+    heatmap_probabilities,
     heatmap_to_input_points,
 )
-from .loss import coordinate_loss, focal_loss, heatmap_loss
+from .loss import coordinate_loss, focal_loss, heatmap_loss, spatial_kl_loss
 from .resnet_fpn import ResNetFPN
 
 __all__ = [
@@ -21,4 +24,8 @@ __all__ = [
     "decode_topk",
     "decode_soft_argmax",
     "heatmap_to_input_points",
+    "decode_local_peak",
+    "decode_heatmaps",
+    "heatmap_probabilities",
+    "spatial_kl_loss",
 ]

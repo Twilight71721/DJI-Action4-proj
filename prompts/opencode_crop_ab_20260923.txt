@@ -1,0 +1,11 @@
+请在这台4090服务器上执行ResNet5000裁剪扰动A/B实验。增量包名为resnet5000_crop_ab_delta_20260923.tar.gz，先找到同名.sha256并校验、解压到新目录，阅读包内START_HERE.md和OPENCODE_SERVER_GUIDE.md，校验SHA256SUMS。不要覆盖已有训练项目或结果。
+
+复用上次成功的Python/Conda环境和已有resnet5000_cleanblur_4090目录。历史服务器路径是/home/aitest/exam-project/resnet5000_cleanblur_4090，但先检查实际位置。需要其dataset、real/manifest.json，以及outputs/resnet5000_paired/best.pth。起始权重SHA256必须是4872f6fd9253fa63ca7df2a5123246ca964f3d1b8a8026213061f370345cedab。不要用3305权重、不要重新下载或上传完整数据、不要修改分组、网络、损失或解码。
+
+先验证CUDA/BF16环境，执行文档列出的单元测试、run_crop_ab.py --action check和裁剪标签预览。然后在tmux中按文档使用--action all串行完成两组smoke、两组正式30轮、统一评估和回传打包。默认batch32、workers4、BF16；A固定裁剪，B仅加入中心±5%和padding[1.2,1.4]扰动。两组从同一原始best.pth加载模型，分别新建优化器，不从smoke继续、不让B从A继续。主比较使用同更新步数的last.pth。
+
+若OOM，保留失败结果，新建输出目录，对两组统一改batch16并重新完成检查和训练；不要只改其中一组。禁止开启最终裁剪缓存、额外模糊、旋转、改图像大小。禁止忽略校验或非有限数值错误。不要安装驱动/系统CUDA或修改系统设置。缺少必要文件时明确报告准确路径和缺项。
+
+训练成功后检查A/B均完成30轮、更新数一致，评估review中同时有原模型/A/B以及新frame0真实图的对照。真实图没有可信八角点真值，只报告定性观察，不能编造真实准确率。all会自动生成crop_ab_30ep.tar.gz和.sha256；只回传结果包和校验文件，不包含dataset。结果包中的权重省略优化器以减小传输量，服务器保留完整checkpoint。
+
+开始时报告实际资产路径、环境、命令和输出目录。训练后用实际每轮seconds估计剩余时间。完成时给我两组轮数、关键验证/测试指标、报告位置及回传包的完整路径和SHA256。

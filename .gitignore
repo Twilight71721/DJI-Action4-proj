@@ -14,6 +14,7 @@ venv/
 # Generated datasets, checkpoints and logs
 dataset/
 outputs/
+/exports/
 runs/
 checkpoints/
 *.pth
@@ -34,6 +35,13 @@ images/
 *.7z
 *.tar
 *.tar.gz
+*.tar.zst
+
+# Local working notes and credentials
+/local-notes/
+.env
+.env.*
+!.env.example
 
 # Editors / operating systems
 .idea/

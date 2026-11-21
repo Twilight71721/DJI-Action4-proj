@@ -1,0 +1,10 @@
+{
+  "description": "Action-segment holdout for the approved 200-image detector pilot. Different from the future 5000-image split; do not merge their scores.",
+  "groups": [
+    {"name": "initial_raise_and_spread", "split": "train", "scenes": ["000000", "000001"]},
+    {"name": "button_handling", "split": "train", "scenes": ["000002", "000003", "000004", "000005", "000006", "000007", "000008", "000009", "000010", "000011"]},
+    {"name": "sleeve_folding", "split": "train", "scenes": ["000012", "000013", "000014"]},
+    {"name": "hem_folding_and_press", "split": "val", "scenes": ["000015", "000016", "000017"]},
+    {"name": "final_raised_gestures", "split": "test", "scenes": ["000018", "000019"]}
+  ]
+}

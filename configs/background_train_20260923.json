@@ -1,0 +1,19 @@
+{
+  "name": "resnet5000_background_mixed_20260923",
+  "checkpoint_sha256": "4872f6fd9253fa63ca7df2a5123246ca964f3d1b8a8026213061f370345cedab",
+  "dataset_manifest_sha256": "1b9a9470289122cb5de20ac69f682a3a7977f43c39facacb64086cd59e75e51a",
+  "epochs": 30,
+  "batch_size": 32,
+  "seed": 20260924,
+  "lr": 0.0001,
+  "backbone_lr_scale": 0.1,
+  "weight_decay": 0.0001,
+  "amp_dtype": "bfloat16",
+  "crop_jitter_shift": 0.05,
+  "crop_jitter_padding": [1.2, 1.4],
+  "background_probability": 0.8,
+  "sampling": "Uniform mixed pool, no background source/split isolation at user request",
+  "checkpoint_selection": "minimum unmodified clean validation error",
+  "training_runs": 1,
+  "real_evaluation": "qualitative demonstration, shared video background source; not independent test"
+}

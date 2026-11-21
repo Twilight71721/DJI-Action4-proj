@@ -1,0 +1,30 @@
+{
+  "epochs": 30,
+  "new_pairs": 12000,
+  "seed": 20260927,
+  "dataset_manifest_sha256": "1b9a9470289122cb5de20ac69f682a3a7977f43c39facacb64086cd59e75e51a",
+  "allowed_checkpoint_sha256": [
+    "a864512c1f1c90562469e0216ae30ccabd8eff7cfa2a71720ebd48a38c615ef9",
+    "96dac397a32491dddbacece40d3989a8975bf744fccd364689c23a3819f65fe1"
+  ],
+  "expected_foreground_assets": 4352,
+  "expected_train_pose_assets": 4096,
+  "expected_val_pose_assets": 256,
+  "extra_occlusion": false,
+  "crop_jitter": false,
+  "online_background_probability": 1.0,
+  "clean_blur_ratio": [
+    1,
+    1
+  ],
+  "pose_sampling": "50% uniform SO3, 50% continuous perturbations of video pose anchors",
+  "appearance_lighting_independent_of_pose": true,
+  "note": "Continue synthetic-only continuous-pose epoch27 with tight GT-cuboid training crops. Keep existing YOLO unchanged; real input boxes are approximate body boxes and the mismatch is reported. No detector training or real-corner fine-tuning.",
+  "crop_mode": "cuboid",
+  "crop_padding": 1.0,
+  "crop_border": 4,
+  "detector_frozen": true,
+  "detector_box_definition": "body",
+  "allow_body_box_approximation": true,
+  "detector_sha256": "78c522b39c2f40dd7fb83447f7987e2cc2cae5f712bf7a6e6620233d66655dd6"
+}

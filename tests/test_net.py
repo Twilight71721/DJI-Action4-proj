@@ -33,6 +33,14 @@ def make_peak_heatmaps() -> torch.Tensor:
 
 
 class TestResNetFPN(unittest.TestCase):
+    def test_resnet50_rectangular_forward_and_backward(self):
+        model = ResNetFPN(backbone="resnet50", fpn_dim=32, pretrained=False)
+        logits = model(torch.randn(2, 3, 64, 96))
+        self.assertEqual(tuple(logits.shape), (2, 8, 16, 24))
+        logits.square().mean().backward()
+        self.assertTrue(torch.isfinite(model.backbone.layer4[0].conv3.weight.grad).all())
+        self.assertGreater(float(model.head[-1].weight.grad.abs().sum()), 0.0)
+
     def test_output_shape_as_logits(self):
         model = ResNetFPN(pretrained=False)
         model.eval()
@@ -70,6 +78,23 @@ class TestDecode(unittest.TestCase):
     def test_topk_shapes(self):
         points = decode_topk(make_peak_heatmaps(), k=4, weighted=False)
         self.assertEqual(tuple(points.shape), (1, 2, 2))
+
+    def test_topk_low_amplitude_does_not_pull_points_to_origin(self):
+        heatmaps = make_peak_heatmaps()
+        torch.testing.assert_close(decode_topk(heatmaps * 1e-30), decode_topk(heatmaps), atol=1e-5, rtol=0)
+
+    def test_logits_topk_survives_sigmoid_underflow(self):
+        logits = torch.full((1, 1, 32, 32), -10000.)
+        logits[0, 0, 20, 25] = -1000.
+        self.assertEqual(float(logits.sigmoid().sum()), 0.)
+        torch.testing.assert_close(decode_topk(logits, from_logits=True), torch.tensor([[[25., 20.]]]))
+
+    def test_logits_and_probability_decoders_agree(self):
+        logits = torch.randn(2, 8, 16, 16)
+        torch.testing.assert_close(decode_topk(logits, from_logits=True), decode_topk(logits.sigmoid()), atol=1e-5, rtol=0)
+
+    def test_zero_probability_map_is_invalid(self):
+        self.assertTrue(torch.isnan(decode_topk(torch.zeros(1, 8, 16, 16))).all())
 
     def test_soft_argmax_near_peak(self):
         points = decode_soft_argmax(make_peak_heatmaps(), temperature=50.0)

@@ -1,0 +1,2 @@
+# Install alongside the existing verified PyTorch environment; no CUDA change.
+ultralytics==8.3.233

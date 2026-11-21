@@ -90,6 +90,7 @@ def coordinate_loss(
     keypoints_input: torch.Tensor,
     valid: torch.Tensor,
     input_size: tuple[int, int],
+    margin: int = 0,
 ) -> torch.Tensor:
     """Differentiable coordinate loss from a spatial softmax over logits.
 
@@ -110,9 +111,51 @@ def coordinate_loss(
 
     input_h, input_w = input_size
     target = keypoints_input.to(logits.dtype).clone()
-    target[..., 0] *= width / input_w
-    target[..., 1] *= height / input_h
+    if margin < 0 or min(height, width) <= 2*margin:
+        raise ValueError('Invalid output heatmap margin')
+    target[..., 0] *= (width-2*margin) / input_w
+    target[..., 1] *= (height-2*margin) / input_h
+    target += margin
     norm = logits.new_tensor([width, height])
     per_corner = F.smooth_l1_loss(predicted / norm, target / norm, reduction="none").sum(-1)
     weight = valid.to(logits.dtype)
     return (per_corner * weight).sum() / weight.sum().clamp_min(1.0)
+
+
+def spatial_kl_loss(logits: torch.Tensor, targets: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+    """Match one normalized spatial distribution for each ordered corner.
+
+    Unlike independent pixel classification, adding a constant to a channel's
+    logits cannot reduce this loss. Empty/invalid targets never become fake
+    border labels. FP32 log-softmax keeps the calculation stable under AMP.
+    """
+    if logits.shape != targets.shape or logits.dim() != 4:
+        raise ValueError('Expected matching [B,C,H,W] logits and targets')
+    _valid_mask(valid, logits)
+    target = targets.float().flatten(2)
+    selected = valid.bool()
+    target = torch.where(selected.unsqueeze(-1), target, torch.zeros_like(target))
+    if not torch.isfinite(target).all() or (target < 0).any():
+        raise ValueError('Valid spatial targets must be finite and nonnegative')
+    mass = target.sum(-1, keepdim=True)
+    if (selected & (mass.squeeze(-1) <= 0)).any():
+        raise ValueError('A supervised corner must have nonempty heatmap support')
+    target = target / mass.clamp_min(torch.finfo(torch.float32).tiny)
+    log_prob = F.log_softmax(logits.float().flatten(2), dim=-1)
+    terms = F.kl_div(log_prob, target, reduction='none').sum(-1)
+    return torch.where(selected, terms, torch.zeros_like(terms)).sum() / selected.sum().clamp_min(1)
+
+
+def spatial_js_loss(first: torch.Tensor, second: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+    """Symmetric JS between corresponding corner distributions; both views receive gradients."""
+    if first.shape != second.shape or first.dim() != 4:
+        raise ValueError('Expected matching [B,C,H,W] logits')
+    _valid_mask(valid, first)
+    selected = valid.bool()
+    a = F.log_softmax(first.float().flatten(2)[selected], dim=-1)
+    b = F.log_softmax(second.float().flatten(2)[selected], dim=-1)
+    if a.shape[0] == 0:
+        return a.sum() + b.sum()
+    log_middle = torch.logaddexp(a, b) - 0.6931471805599453
+    return .5 * ((a.exp() * (a-log_middle)).sum(-1) +
+                 (b.exp() * (b-log_middle)).sum(-1)).mean()

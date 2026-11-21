@@ -1,0 +1,14 @@
+{
+  "prepared_sha256": "fefa9dd8d01f6a27eef4086b9b6a1af4eed585469f8549bb331d08be67baf3f7",
+  "foreground_sha256": "9d5bb1a9a8ce0a19baae224ef06396f0185d8768cfe9ab8cd1d352a2dabbcc95",
+  "background_sha256": "d1ec349fb9de77d98b08f886645da6673d59c1bef1c474eb52f7dad390b46c97",
+  "dataset_manifest_sha256": "1b9a9470289122cb5de20ac69f682a3a7977f43c39facacb64086cd59e75e51a",
+  "expected_train_instances_before_filter": 40000,
+  "expected_validation_instances": 3048,
+  "expected_test_instances_per_variant": 1000,
+  "foreground_train": 4096,
+  "foreground_val": 256,
+  "background_records": 13824,
+  "formal_epochs": 30,
+  "source": "continuous_pose_background_30ep server returned training provenance; old checkpoint intentionally not reused"
+}

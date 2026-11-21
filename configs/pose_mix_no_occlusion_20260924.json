@@ -1,0 +1,32 @@
+{
+  "name": "resnet_pose_mix_no_occlusion_20260924",
+  "allowed_checkpoint_sha256": [
+    "91251527dcc1c1d5bb51c20f0054e2264a39b00e096956db1b92820139a61ded",
+    "dbd4c52f9d34763d189271f7311af1c87b004329b38dc2a27da0050aabda1d19"
+  ],
+  "dataset_manifest_sha256": "1b9a9470289122cb5de20ac69f682a3a7977f43c39facacb64086cd59e75e51a",
+  "new_pairs": 8000,
+  "web_backgrounds": 5120,
+  "epochs": 30,
+  "batch_size": 32,
+  "seed": 20260925,
+  "lr": 0.0001,
+  "extra_occlusion": false,
+  "crop_jitter": false,
+  "input_size": [
+    256,
+    256
+  ],
+  "heatmap_size": [
+    64,
+    64
+  ],
+  "old_instances": 16000,
+  "new_instances": 16000,
+  "clean_blur_ratio": [
+    1,
+    1
+  ],
+  "init": "background_mixed_30ep clean-validation best epoch28",
+  "checkpoint_selection": "original clean validation error minimum"
+}
